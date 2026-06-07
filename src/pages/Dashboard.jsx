@@ -1287,7 +1287,7 @@ function Dashboard() {
                 />
             )}
 
-            <div className="max-w-7xl mx-auto py-4 px-4 md:px-6 w-full">
+            <div className="w-full py-4 px-0 md:max-w-7xl md:mx-auto md:px-6">
                 {/* Top bar */}
                 <div className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                     <div>
@@ -1424,7 +1424,7 @@ function Dashboard() {
                 {activeTab === 'explore' && (
                     <div>
                         {/* Hero Banner */}
-<div className="relative rounded-2xl overflow-hidden mb-8"
+<div className="relative rounded-none md:rounded-2xl overflow-hidden mb-4 md:mb-8 mx-0"
     style={{ background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4f46e5 100%)' }}>
     <div className="absolute inset-0 opacity-20"
         style={{
@@ -1450,7 +1450,7 @@ function Dashboard() {
                         
 
                         {/* Course Grid */}
-                        <div id="course-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                        <div id="course-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 px-3 md:px-0 md:gap-8">
                             {ALL_COURSES.map((course) => {
                                 const isPaid = course.price > 0;
                                 const isPurchased = purchasedCourseIds.includes(course.id);
