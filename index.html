@@ -25,6 +25,20 @@
 
     <title>Open Academy LMS</title>
   </head>
+
+  <script>
+  // Force unregister all service workers and clear cache
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(regs => {
+      regs.forEach(reg => reg.unregister());
+    });
+    caches.keys().then(cacheNames => {
+      cacheNames.forEach(cacheName => {
+        caches.delete(cacheName);
+      });
+    });
+  }
+</script>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
