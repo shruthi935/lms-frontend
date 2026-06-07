@@ -1,0 +1,5 @@
+{
+  "appId": "com.openacademy.lms",
+  "appName": "lms-app",
+  "webDir": "dist"
+}

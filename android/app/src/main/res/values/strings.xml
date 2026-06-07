@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">lms-app</string>
+    <string name="title_activity_main">lms-app</string>
+    <string name="package_name">com.openacademy.lms</string>
+    <string name="custom_url_scheme">com.openacademy.lms</string>
+</resources>

@@ -11,6 +11,14 @@ function Login() {
     const [success, setSuccess] = useState('');
     const navigate = useNavigate();
 
+    const setupUserSession = (uname, isAdminUser) => {
+        localStorage.setItem('username', uname);
+        localStorage.setItem('role', isAdminUser ? 'admin' : 'student');
+        // DO NOT clear completed_, enrolled_, purchased_ — progress is preserved across logins
+        // Only clear session popups so certificate popup doesn't re-show automatically
+        sessionStorage.clear();
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
@@ -19,50 +27,46 @@ function Login() {
         try {
             if (isRegister) {
                 try {
-                    // Try reaching your backend API registration endpoint
                     await API.post('register/', { username, email, password });
-                    setSuccess('Account registered on database backend! You can now log in.');
-                } catch (apiErr) {
-                    console.warn("Backend /register/ endpoint missing. Falling back to local sandbox registration mode.");
-                    // Fallback configuration if your backend isn't set up yet
-                    setSuccess('Account created (Sandbox Mode)! Try logging in with your credentials now.');
-                }
+                    setSuccess('Account registered! You can now log in.');
+               } catch (apiErr) {
+    // Save user locally since backend is down
+    const registeredUsers = JSON.parse(localStorage.getItem('registered_users') || '[]');
+    const userExists = registeredUsers.find(u => u.username === username);
+    if (userExists) {
+        setError('Username already exists. Please login.');
+        return;
+    }
+    registeredUsers.push({ username, email, password });
+    localStorage.setItem('registered_users', JSON.stringify(registeredUsers));
+    setSuccess('Account created! You can now log in.');
+}
                 setIsRegister(false);
                 setPassword('');
             } else {
                 try {
-                    // Login API Flow
                     const response = await API.post('token/', { username, password });
                     localStorage.setItem('access_token', response.data.access);
-localStorage.setItem('refresh_token', response.data.refresh);
-localStorage.setItem('username', username);
-
-// Temporary admin check
-if (username === 'admin') {
-    localStorage.setItem('role', 'admin');
-} else {
-    localStorage.setItem('role', 'student');
+                    localStorage.setItem('refresh_token', response.data.refresh);
+                    setupUserSession(username, username === 'admin');
+                    navigate('/');
+                    } catch (loginErr) {
+    // Backend down - use sandbox mode but check if user registered
+    const registeredUsers = JSON.parse(localStorage.getItem('registered_users') || '[]');
+    const userExists = registeredUsers.find(u => u.username === username && u.password === password);
+    if (userExists) {
+        localStorage.setItem('access_token', 'mock-sandbox-token-xyz-123');
+        setupUserSession(username, username === 'admin');
+        navigate('/');
+    } else {
+        setError('Invalid username or password. Please register first.');
+    }
 }
-
-navigate('/');
-                } catch (loginErr) {
-                    // Sandbox bypass login so you are never locked out of testing your UI
-                    console.warn("Backend token generation down. Authenticating via development environment mock safety bypass.");
-                    localStorage.setItem('access_token', 'mock-sandbox-token-xyz-123');
-localStorage.setItem('username', username);
-
-// Temporary admin check
-if (username === 'admin') {
-    localStorage.setItem('role', 'admin');
-} else {
-    localStorage.setItem('role', 'student');
-}
-
-navigate('/');
+         
                 }
             }
-        } catch (err) {
-            setError('System processing failure. Please check terminal logs.');
+         catch (err) {
+            setError('Something went wrong. Please try again.');
         }
     };
 
@@ -81,41 +85,41 @@ navigate('/');
             <form onSubmit={handleSubmit} className="space-y-5">
                 <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Username</label>
-                    <input 
-                        type="text" 
-                        value={username} 
-                        onChange={(e) => setUsername(e.target.value)} 
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500" 
-                        required 
+                    <input
+                        type="text"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        required
                     />
                 </div>
 
                 {isRegister && (
                     <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-2">Email Address</label>
-                        <input 
-                            type="email" 
-                            value={email} 
-                            onChange={(e) => setEmail(e.target.value)} 
-                            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500" 
-                            required 
+                        <input
+                            type="email"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            required
                         />
                     </div>
                 )}
 
                 <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Password</label>
-                    <input 
-                        type="password" 
-                        value={password} 
-                        onChange={(e) => setPassword(e.target.value)} 
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500" 
-                        required 
+                    <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        required
                     />
                 </div>
 
-                <button 
-                    type="submit" 
+                <button
+                    type="submit"
                     className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-100"
                 >
                     {isRegister ? 'Sign Up' : 'Sign In'}
@@ -123,8 +127,8 @@ navigate('/');
             </form>
 
             <div className="mt-6 text-center border-t border-gray-100 pt-4">
-                <button 
-                    type="button" // Force standard execution layout block 
+                <button
+                    type="button"
                     onClick={() => { setIsRegister(!isRegister); setError(''); setSuccess(''); }}
                     className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
                 >
@@ -134,7 +138,5 @@ navigate('/');
         </div>
     );
 }
-
-
 
 export default Login;

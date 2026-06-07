@@ -1,5 +1,121 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+// Parse "42 Hours" → milliseconds
+function parseDurationToMs(durationStr) {
+    const match = durationStr?.match(/(\d+(\.\d+)?)/);
+    const hours = match ? parseFloat(match[1]) : 1;
+    return hours * 60 * 60 * 1000;
+}
+
+function requestNotificationPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+    }
+}
+
+function sendBrowserNotification(title, body) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(title, { body, icon: '/favicon.ico' });
+    }
+}
+
+function useCourseTimer(course, username, isEnrolled, completedLessonIds) {
+    const [timeLeft, setTimeLeft] = useState(null);
+    const [notified, setNotified] = useState(false);
+    const [expired, setExpired] = useState(false);
+    const [showBanner, setShowBanner] = useState(false);
+    const [bannerMsg, setBannerMsg] = useState('');
+
+    const allDone = course && course.lessons.every(l => completedLessonIds.includes(l.id));
+
+    useEffect(() => {
+        if (!course || !isEnrolled || allDone) return;
+
+        const key = `course_deadline_${username}_${course.id}`;
+        let deadline = localStorage.getItem(key);
+
+        if (!deadline) {
+            const ms = parseDurationToMs(course.duration);
+            deadline = Date.now() + ms;
+            localStorage.setItem(key, deadline);
+        } else {
+            deadline = parseInt(deadline);
+        }
+
+        const interval = setInterval(() => {
+            const remaining = deadline - Date.now();
+
+            if (remaining <= 0) {
+                setTimeLeft(0);
+                setExpired(true);
+                clearInterval(interval);
+                setBannerMsg(`⏰ Time's up for "${course.title}"! Please complete it.`);
+                setShowBanner(true);
+                sendBrowserNotification('Course Deadline Passed!', `You didn't complete "${course.title}" in time.`);
+                return;
+            }
+
+            setTimeLeft(remaining);
+
+            // Notify at 30 min mark
+            const thirtyMin = 30 * 60 * 1000;
+            if (!notified && remaining <= thirtyMin) {
+                setNotified(true);
+                const mins = Math.ceil(remaining / 60000);
+                setBannerMsg(`⚠️ Only ${mins} minutes left to complete "${course.title}"!`);
+                setShowBanner(true);
+                sendBrowserNotification(
+                    '⚠️ Course Deadline Soon!',
+                    `Only ${mins} min left to finish "${course.title}". Hurry up!`
+                );
+            }
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [course?.id, isEnrolled, allDone]);
+
+    return { timeLeft, expired, showBanner, setShowBanner, bannerMsg };
+}
+function CourseTimerBadge({ timeLeft, expired }) {
+    if (timeLeft === null || expired === undefined) return null;
+
+    const formatTime = (ms) => {
+        const totalSecs = Math.floor(ms / 1000);
+        const h = Math.floor(totalSecs / 3600);
+        const m = Math.floor((totalSecs % 3600) / 60);
+        const s = totalSecs % 60;
+        return `${h}h ${m}m ${s}s`;
+    };
+
+    if (expired) {
+        return (
+            <span className="inline-flex items-center gap-1 bg-red-100 text-red-600 text-[10px] font-black px-2 py-1 rounded-full border border-red-200">
+                ⏰ EXPIRED
+            </span>
+        );
+    }
+
+    const isUrgent = timeLeft <= 30 * 60 * 1000;
+    return (
+        <span className={`inline-flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full border
+            ${isUrgent
+                ? 'bg-red-50 text-red-600 border-red-200 animate-pulse'
+                : 'bg-amber-50 text-amber-600 border-amber-200'}`}>
+            ⏱ {formatTime(timeLeft)}
+        </span>
+    );
+}
+
+function NotificationBanner({ message, onClose }) {
+    return (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[999] w-[92%] max-w-lg bg-gray-900 text-white px-5 py-4 rounded-2xl shadow-2xl border border-gray-700 flex items-start gap-3"
+            style={{ animation: 'fadeInDown 0.3s ease forwards' }}>
+            <span className="text-xl flex-shrink-0">🔔</span>
+            <p className="text-sm font-semibold flex-1">{message}</p>
+            <button onClick={onClose} className="text-gray-400 hover:text-white font-bold text-lg leading-none">✕</button>
+        </div>
+    );
+}
 
 const MOCK_COURSES = [
     {
@@ -106,7 +222,6 @@ const MOCK_COURSES = [
     }
 ];
 
-// ─── Curated Unsplash thumbnails per category ─────────────────────────────────
 const CATEGORY_THUMBNAILS = {
     Development: [
         'https://images.unsplash.com/photo-1555066931-4365d14bab8c?auto=format&fit=crop&w=800&q=80',
@@ -188,8 +303,9 @@ function CreateCourseModal({ onClose, onCourseCreated }) {
 
     const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
     const activeThumbnail = form.customThumbnail || form.thumbnail;
+    // Request notification permission on load
+useEffect(() => { requestNotificationPermission(); }, []);
 
-    // Auto-select first thumbnail when category changes
     useEffect(() => {
         setForm(f => ({ ...f, thumbnail: CATEGORY_THUMBNAILS[f.category][0], customThumbnail: '' }));
     }, [form.category]);
@@ -224,7 +340,7 @@ function CreateCourseModal({ onClose, onCourseCreated }) {
         return (
             <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
                 <div className="bg-white rounded-3xl shadow-2xl p-10 max-w-sm w-full text-center">
-                    <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-5 text-4xl" style={{ animation: 'bounce 1s infinite' }}>🚀</div>
+                    <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-5 text-4xl">🚀</div>
                     <h2 className="text-2xl font-black text-gray-900">Course Published!</h2>
                     <p className="text-gray-400 mt-2 text-sm">
                         <span className="font-bold text-gray-700">"{form.title}"</span> is now live in the dashboard.
@@ -245,7 +361,6 @@ function CreateCourseModal({ onClose, onCourseCreated }) {
                 className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto"
                 onClick={e => e.stopPropagation()}
             >
-                {/* Modal Header */}
                 <div className="sticky top-0 bg-white z-10 px-8 pt-7 pb-4 border-b border-gray-100 rounded-t-3xl">
                     <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-3">
@@ -265,7 +380,7 @@ function CreateCourseModal({ onClose, onCourseCreated }) {
                 </div>
 
                 <div className="px-8 py-6">
-                    {/* ── Step 0: Course Info ────────────────────────────── */}
+                    {/* Step 0: Course Info */}
                     {step === 0 && (
                         <div className="space-y-5">
                             <div>
@@ -325,7 +440,7 @@ function CreateCourseModal({ onClose, onCourseCreated }) {
                         </div>
                     )}
 
-                    {/* ── Step 1: Thumbnail ──────────────────────────────── */}
+                    {/* Step 1: Thumbnail */}
                     {step === 1 && (
                         <div className="space-y-5">
                             <div>
@@ -359,7 +474,6 @@ function CreateCourseModal({ onClose, onCourseCreated }) {
                                     placeholder="https://images.unsplash.com/..."
                                     className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
                             </div>
-                            {/* Live preview */}
                             <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-md">
                                 <div className="relative h-40">
                                     <img src={activeThumbnail} alt="Preview" className="w-full h-full object-cover" onError={e => { e.target.src = CATEGORY_THUMBNAILS[form.category][0]; }} />
@@ -382,7 +496,7 @@ function CreateCourseModal({ onClose, onCourseCreated }) {
                         </div>
                     )}
 
-                    {/* ── Step 2: First Lesson ───────────────────────────── */}
+                    {/* Step 2: First Lesson */}
                     {step === 2 && (
                         <div className="space-y-5">
                             <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
@@ -424,7 +538,7 @@ function CreateCourseModal({ onClose, onCourseCreated }) {
                         </div>
                     )}
 
-                    {/* ── Step 3: Review & Publish ───────────────────────── */}
+                    {/* Step 3: Review & Publish */}
                     {step === 3 && (
                         <div className="space-y-5">
                             <div className="bg-white rounded-2xl overflow-hidden shadow-lg border border-gray-100">
@@ -621,11 +735,17 @@ function QRPaymentScreen({ course, onSuccess, onBack }) {
 
 // ─── Certificate Modal ────────────────────────────────────────────────────────
 function CertificateModal({ course, username, onClose }) {
-    const studentName = username ||
+    const defaultName = username ||
         localStorage.getItem("username") || localStorage.getItem("user_name") ||
         localStorage.getItem("name") || localStorage.getItem("full_name") ||
         localStorage.getItem("fullName") || localStorage.getItem("user") ||
         localStorage.getItem("email") || "Student";
+
+    const [studentName, setStudentName] = useState(defaultName);
+    const [editingName, setEditingName] = useState(false);
+    const [tempName, setTempName] = useState(defaultName);
+    const [confirmed, setConfirmed] = useState(false);
+
     const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
     const certId = `LMS-${course.id}-${Date.now().toString(36).toUpperCase()}`;
 
@@ -643,6 +763,78 @@ function CertificateModal({ course, username, onClose }) {
         URL.revokeObjectURL(url);
     };
 
+    // ── Name Confirmation Screen ──────────────────────────────────────────
+    if (!confirmed) {
+        return (
+            <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
+                <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden" onClick={e => e.stopPropagation()}>
+                    <div className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-6 text-white text-center">
+                        <div className="text-4xl mb-2">🎓</div>
+                        <h2 className="text-xl font-black">Almost There!</h2>
+                        <p className="text-indigo-200 text-sm mt-1">Your certificate is ready to generate</p>
+                    </div>
+
+                    <div className="p-6 space-y-5">
+                        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-center">
+                            <p className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-1">Certificate will be issued to</p>
+                            <p className="text-2xl font-black text-gray-900 italic">{studentName}</p>
+                        </div>
+
+                        {!editingName ? (
+                            <button
+                                onClick={() => { setEditingName(true); setTempName(studentName); }}
+                                className="w-full flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl text-sm transition border border-gray-200"
+                            >
+                                ✏️ Edit Name
+                            </button>
+                        ) : (
+                            <div className="space-y-3">
+                                <label className="block text-xs font-black text-gray-500 uppercase tracking-wider">Enter your name</label>
+                                <input
+                                    type="text"
+                                    value={tempName}
+                                    onChange={e => setTempName(e.target.value)}
+                                    autoFocus
+                                    placeholder="Your full name"
+                                    className="w-full px-4 py-3 rounded-xl border border-indigo-300 text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-semibold text-center text-lg"
+                                />
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => setEditingName(false)}
+                                        className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold py-2.5 rounded-xl text-sm transition"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={() => { if (tempName.trim()) { setStudentName(tempName.trim()); setEditingName(false); } }}
+                                        disabled={!tempName.trim()}
+                                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 text-white font-bold py-2.5 rounded-xl text-sm transition"
+                                    >
+                                        ✓ Save Name
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="pt-2 border-t border-gray-100 space-y-2">
+                            <button
+                                onClick={() => setConfirmed(true)}
+                                disabled={editingName}
+                                className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 disabled:opacity-50 text-white font-black py-3.5 rounded-xl text-sm transition shadow-lg shadow-amber-200 flex items-center justify-center gap-2"
+                            >
+                                🏆 Generate My Certificate
+                            </button>
+                            <button onClick={onClose} className="w-full bg-gray-50 hover:bg-gray-100 text-gray-500 font-semibold py-2.5 rounded-xl text-sm transition">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // ── Certificate View ──────────────────────────────────────────────────
     return (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
             <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -689,7 +881,10 @@ function CertificateModal({ course, username, onClose }) {
                         <p className="text-sm text-gray-400">Issued to: <span className="font-bold text-indigo-600">{studentName}</span></p>
                     </div>
                     <div className="flex gap-3">
-                        <button onClick={handleDownload} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition shadow-lg shadow-indigo-100">⬇ Download Certificate</button>
+                        <button onClick={() => setConfirmed(false)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold px-4 py-2.5 rounded-xl text-sm transition">
+                            ✏️ Edit Name
+                        </button>
+                        <button onClick={handleDownload} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition shadow-lg shadow-indigo-100">⬇ Download</button>
                         <button onClick={onClose} className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold px-5 py-2.5 rounded-xl text-sm transition">Close</button>
                     </div>
                 </div>
@@ -699,56 +894,74 @@ function CertificateModal({ course, username, onClose }) {
 }
 
 // ─── Enrolled Course Card ─────────────────────────────────────────────────────
-function EnrolledCourseCard({ course, completedLessonIds, onResume, onViewCertificate }) {
+function EnrolledCourseCard({ course, completedLessonIds, onResume, onViewCertificate, username }) {
     const total = course.lessons.length;
     const done = course.lessons.filter(l => completedLessonIds.includes(l.id)).length;
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
     const isCompleted = pct === 100;
 
+    const { timeLeft, expired, showBanner, setShowBanner, bannerMsg } =
+        useCourseTimer(course, username, true, completedLessonIds);
+
     return (
-        <div className={`bg-white rounded-2xl border shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col ${isCompleted ? 'border-emerald-200 ring-1 ring-emerald-100' : 'border-gray-100'}`}>
-            <div className="relative h-40 rounded-t-2xl overflow-hidden flex-shrink-0">
-                <img src={course.thumbnail} alt={course.title} className="w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-                {isCompleted && (
-                    <div className="absolute top-3 right-3 bg-emerald-500 text-white text-[10px] font-black px-2 py-1 rounded-full uppercase tracking-wider">✓ Completed</div>
-                )}
-                <div className="absolute bottom-3 left-3 right-3">
-                    <div className="flex justify-between text-white text-xs font-semibold mb-1">
-                        <span>{done}/{total} lessons</span>
-                        <span>{pct}%</span>
-                    </div>
-                    <div className="w-full bg-white/30 rounded-full h-1.5">
-                        <div className={`h-full rounded-full transition-all duration-500 ${isCompleted ? 'bg-emerald-400' : 'bg-indigo-400'}`} style={{ width: `${pct}%` }} />
+        <>
+            {showBanner && (
+                <NotificationBanner message={bannerMsg} onClose={() => setShowBanner(false)} />
+            )}
+            <div className={`bg-white rounded-2xl border shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col
+                ${isCompleted ? 'border-emerald-200 ring-1 ring-emerald-100' :
+                  expired ? 'border-red-200 ring-1 ring-red-100' : 'border-gray-100'}`}>
+                <div className="relative h-40 rounded-t-2xl overflow-hidden flex-shrink-0">
+                    <img src={course.thumbnail} alt={course.title} className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                    {isCompleted && (
+                        <div className="absolute top-3 right-3 bg-emerald-500 text-white text-[10px] font-black px-2 py-1 rounded-full uppercase tracking-wider">✓ Completed</div>
+                    )}
+                    {expired && !isCompleted && (
+                        <div className="absolute top-3 right-3 bg-red-500 text-white text-[10px] font-black px-2 py-1 rounded-full uppercase tracking-wider animate-pulse">⏰ Expired</div>
+                    )}
+                    <div className="absolute bottom-3 left-3 right-3">
+                        <div className="flex justify-between text-white text-xs font-semibold mb-1">
+                            <span>{done}/{total} lessons</span>
+                            <span>{pct}%</span>
+                        </div>
+                        <div className="w-full bg-white/30 rounded-full h-1.5">
+                            <div className={`h-full rounded-full transition-all duration-500 ${isCompleted ? 'bg-emerald-400' : expired ? 'bg-red-400' : 'bg-indigo-400'}`}
+                                style={{ width: `${pct}%` }} />
+                        </div>
                     </div>
                 </div>
-            </div>
-            <div className="p-4 flex flex-col flex-1">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded w-fit">{course.category}</span>
-                <h3 className="text-sm font-bold text-gray-900 mt-2 line-clamp-2 flex-1">{course.title}</h3>
-                <div className="flex items-center gap-2 mt-1 text-xs text-gray-400">
-                    <span>{course.level}</span><span>·</span><span>{course.duration}</span>
-                </div>
-                {isCompleted ? (
-                    <div className="mt-4 flex flex-col gap-2">
-                        <button onClick={() => onViewCertificate(course)}
-                            className="w-full py-3 rounded-xl font-bold text-sm transition bg-amber-500 hover:bg-amber-400 active:scale-95 text-white flex items-center justify-center gap-2"
-                            style={{ boxShadow: '0 4px 14px rgba(245,158,11,0.35)' }}>
-                            🏆 View Certificate
-                        </button>
+                <div className="p-4 flex flex-col flex-1">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">{course.category}</span>
+                        {!isCompleted && <CourseTimerBadge timeLeft={timeLeft} expired={expired} />}
+                    </div>
+                    <h3 className="text-sm font-bold text-gray-900 mt-2 line-clamp-2 flex-1">{course.title}</h3>
+                    <div className="flex items-center gap-2 mt-1 text-xs text-gray-400">
+                        <span>{course.level}</span><span>·</span><span>{course.duration}</span>
+                    </div>
+                    {isCompleted ? (
+                        <div className="mt-4 flex flex-col gap-2">
+                            <button onClick={() => onViewCertificate(course)}
+                                className="w-full py-3 rounded-xl font-bold text-sm transition bg-amber-500 hover:bg-amber-400 active:scale-95 text-white flex items-center justify-center gap-2"
+                                style={{ boxShadow: '0 4px 14px rgba(245,158,11,0.35)' }}>
+                                🏆 View Certificate
+                            </button>
+                            <button onClick={() => onResume(course)}
+                                className="w-full py-2.5 rounded-xl font-bold text-sm transition bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100">
+                                🎓 Review Course
+                            </button>
+                        </div>
+                    ) : (
                         <button onClick={() => onResume(course)}
-                            className="w-full py-2.5 rounded-xl font-bold text-sm transition bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100">
-                            🎓 Review Course
+                            className={`mt-4 w-full py-2.5 rounded-xl font-bold text-sm transition shadow-md
+                                ${expired ? 'bg-red-600 hover:bg-red-700 text-white shadow-red-100' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-100'}`}>
+                            {expired ? '⚠️ Resume (Overdue)' : pct === 0 ? '▶ Start Learning' : '▶ Continue Learning'}
                         </button>
-                    </div>
-                ) : (
-                    <button onClick={() => onResume(course)}
-                        className="mt-4 w-full py-2.5 rounded-xl font-bold text-sm transition bg-indigo-600 text-white hover:bg-indigo-700 shadow-md shadow-indigo-100">
-                        {pct === 0 ? '▶ Start Learning' : '▶ Continue Learning'}
-                    </button>
-                )}
+                    )}
+                </div>
             </div>
-        </div>
+        </>
     );
 }
 
@@ -760,7 +973,6 @@ function Dashboard() {
     const [paymentCourse, setPaymentCourse] = useState(null);
     const [showQR, setShowQR] = useState(false);
     const [certificateCourse, setCertificateCourse] = useState(null);
-    // ── NEW: controls the Create Course modal ─────────────────────────────────
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [showAdminDenied, setShowAdminDenied] = useState(false);
 
@@ -770,9 +982,8 @@ function Dashboard() {
         localStorage.getItem('fullName') || localStorage.getItem('user') ||
         localStorage.getItem('email') || 'Student'
     );
-   const isAdmin = true;
-   console.log("Role:", localStorage.getItem("role"));
-console.log("Admin:", isAdmin);
+
+    const isAdmin = true;
 
     const [enrolledCourseIds, setEnrolledCourseIds] = useState(() => {
         const saved = localStorage.getItem(`enrolled_${username}`);
@@ -792,6 +1003,7 @@ console.log("Admin:", isAdmin);
     });
 
     const ALL_COURSES = [...MOCK_COURSES, ...adminCourses];
+    localStorage.setItem('all_courses_cache', JSON.stringify(ALL_COURSES));
     const navigate = useNavigate();
 
     useEffect(() => { localStorage.setItem(`enrolled_${username}`, JSON.stringify(enrolledCourseIds)); }, [enrolledCourseIds]);
@@ -823,6 +1035,7 @@ console.log("Admin:", isAdmin);
             prev.includes(lessonId) ? prev.filter(id => id !== lessonId) : [...prev, lessonId]
         );
     };
+
     useEffect(() => {
         if (!selectedCourse || certificateCourse) return;
         const allDone = selectedCourse.lessons.every(l => completedLessonIds.includes(l.id));
@@ -835,19 +1048,28 @@ console.log("Admin:", isAdmin);
         }
     }, [completedLessonIds, selectedCourse]);
 
+    useEffect(() => {
+        const certId = localStorage.getItem('open_cert');
+        if (certId) {
+            localStorage.removeItem('open_cert');
+            const course = ALL_COURSES.find(c => String(c.id) === certId);
+            if (course) setCertificateCourse(course);
+        }
+    }, [ALL_COURSES]);
+
     const handleAdminCourseCreated = (course) => {
         setAdminCourses(prev => [...prev, course]);
     };
-    useEffect(() => {
-    const handleNewCourse = () => {
-        const saved = localStorage.getItem('admin_courses');
-        setAdminCourses(saved ? JSON.parse(saved) : []);
-    };
-    window.addEventListener('admin_course_created', handleNewCourse);
-    return () => window.removeEventListener('admin_course_created', handleNewCourse);
-}, []);
 
-    // ── Navbar Create Course button handler ───────────────────────────────────
+    useEffect(() => {
+        const handleNewCourse = () => {
+            const saved = localStorage.getItem('admin_courses');
+            setAdminCourses(saved ? JSON.parse(saved) : []);
+        };
+        window.addEventListener('admin_course_created', handleNewCourse);
+        return () => window.removeEventListener('admin_course_created', handleNewCourse);
+    }, []);
+
     const handleCreateCourseClick = () => {
         if (!isAuthenticated) { navigate('/login'); return; }
         if (!isAdmin) {
@@ -858,23 +1080,12 @@ console.log("Admin:", isAdmin);
         setShowCreateModal(true);
     };
 
-    if (!isAuthenticated) {
-        return (
-            <div className="max-w-xl mx-auto mt-16 text-center bg-white p-10 rounded-2xl border border-gray-100 shadow-xl">
-                <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-6 text-2xl font-bold">🔒</div>
-                <h2 className="text-3xl font-black text-gray-900 tracking-tight">Authentication Required</h2>
-                <p className="text-gray-500 mt-3 mb-8 leading-relaxed">Our dynamic course catalogs and video classrooms are strictly reserved for logged-in members.</p>
-                <button onClick={() => navigate('/login')} className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-100">
-                    Sign In / Register
-                </button>
-            </div>
-        );
-    }
-
+    // ── QR Payment Screen ─────────────────────────────────────────────────────
     if (paymentCourse && showQR) {
         return <QRPaymentScreen course={paymentCourse} onBack={() => setShowQR(false)} onSuccess={() => handlePaymentSuccess(paymentCourse)} />;
     }
 
+    // ── Checkout Screen ───────────────────────────────────────────────────────
     if (paymentCourse) {
         return (
             <div className="max-w-2xl mx-auto mt-12 bg-white rounded-3xl border border-gray-100 shadow-2xl overflow-hidden">
@@ -1069,7 +1280,6 @@ console.log("Admin:", isAdmin);
                 <CertificateModal course={certificateCourse} username={username} onClose={() => setCertificateCourse(null)} />
             )}
 
-            {/* ── Create Course Modal ─────────────────────────────────────── */}
             {showCreateModal && (
                 <CreateCourseModal
                     onClose={() => setShowCreateModal(false)}
@@ -1077,8 +1287,8 @@ console.log("Admin:", isAdmin);
                 />
             )}
 
-            <div className="max-w-7xl mx-auto py-4">
-                {/* ── Top bar with Create Course navbar button ──────────── */}
+            <div className="max-w-7xl mx-auto py-4 px-4 md:px-6 w-full">
+                {/* Top bar */}
                 <div className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                     <div>
                         <div className="flex items-center gap-3">
@@ -1090,7 +1300,7 @@ console.log("Admin:", isAdmin);
                         <p className="text-gray-500 mt-1 text-base">Explore courses or pick up where you left off.</p>
                     </div>
 
-                    {/* ── Create Course Button (navbar-style, top-right) ─── */}
+                    {/* Create Course Button */}
                     <div className="relative flex-shrink-0">
                         <button
                             onClick={handleCreateCourseClick}
@@ -1109,7 +1319,6 @@ console.log("Admin:", isAdmin);
                             )}
                         </button>
 
-                        {/* Non-admin denied toast */}
                         {showAdminDenied && (
                             <div className="absolute top-12 right-0 w-64 bg-gray-900 text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-2xl border border-gray-700 z-50"
                                 style={{ animation: 'fadeInDown 0.2s ease forwards' }}>
@@ -1125,6 +1334,7 @@ console.log("Admin:", isAdmin);
                     </div>
                 </div>
 
+                {/* Tabs */}
                 <div className="flex items-center gap-2 mb-8 border-b border-gray-200 pb-0">
                     <button onClick={() => setActiveTab('explore')}
                         className={`px-5 py-3 text-sm font-bold rounded-t-xl transition border-b-2 -mb-px ${
@@ -1145,7 +1355,7 @@ console.log("Admin:", isAdmin);
                     </button>
                 </div>
 
-                {/* My Courses */}
+                {/* My Courses Tab */}
                 {activeTab === 'my-courses' && (
                     <div>
                         {enrolledCourses.length === 0 ? (
@@ -1202,7 +1412,7 @@ console.log("Admin:", isAdmin);
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                                     {enrolledCourses.map(course => (
                                         <EnrolledCourseCard key={course.id} course={course} completedLessonIds={completedLessonIds}
-                                            onResume={handleResume} onViewCertificate={(c) => setCertificateCourse(c)} />
+                                            onResume={handleResume} onViewCertificate={(c) => setCertificateCourse(c)} username={username} />
                                     ))}
                                 </div>
                             </>
@@ -1210,60 +1420,90 @@ console.log("Admin:", isAdmin);
                     </div>
                 )}
 
-                {/* Explore */}
+                {/* Explore Tab */}
                 {activeTab === 'explore' && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                        {ALL_COURSES.map((course) => {
-                            const isPaid = course.price > 0;
-                            const isPurchased = purchasedCourseIds.includes(course.id);
-                            const isEnrolled = enrolledCourseIds.includes(course.id);
-                            return (
-                                <div key={course.id} className="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-2xl transition-all border border-gray-100 flex flex-col justify-between">
-                                    <div className="h-48 bg-gray-100 relative">
-                                        <img src={course.thumbnail} alt={course.title} className="w-full h-full object-cover" />
-                                        <span className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-bold text-indigo-600 uppercase tracking-widest border border-gray-100">
-                                            {course.level}
-                                        </span>
-                                        {isEnrolled && (
-                                            <span className="absolute top-4 left-4 bg-emerald-500 text-white text-[10px] font-black px-2 py-1 rounded-full uppercase tracking-wider">✓ Enrolled</span>
-                                        )}
-                                        {course.adminCreated && (
-                                            <span className="absolute bottom-3 left-3 bg-indigo-600 text-white text-[10px] font-black px-2 py-1 rounded-full uppercase tracking-wider">Admin Created</span>
-                                        )}
-                                    </div>
-                                    <div className="p-6 flex-1 flex flex-col justify-between">
-                                        <div>
-                                            <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md">{course.category}</span>
-                                            <h3 className="text-xl font-bold text-gray-900 mt-3 line-clamp-2 min-h-[56px]">{course.title}</h3>
-                                            <p className="text-gray-500 text-sm mt-2 line-clamp-3">{course.description}</p>
+                    <div>
+                        {/* Hero Banner */}
+<div className="relative rounded-2xl overflow-hidden mb-8"
+    style={{ background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4f46e5 100%)' }}>
+    <div className="absolute inset-0 opacity-20"
+        style={{
+            backgroundImage: 'url(https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80)',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center'
+        }}
+    />
+    <div className="relative z-10 px-10 py-12 max-w-xl">
+        <h2 className="text-3xl font-black text-white leading-tight mb-3">
+            Skills that start careers
+        </h2>
+        <p className="text-indigo-200 text-sm mb-6 leading-relaxed">
+            Learn from expert instructors, earn certificates, and advance your career with our world-class courses.
+        </p>
+        <button
+    onClick={() => document.getElementById('course-grid').scrollIntoView({ behavior: 'smooth' })}
+    className="bg-white text-indigo-700 font-black px-6 py-3 rounded-xl text-sm hover:bg-indigo-50 transition shadow-lg">
+    Explore All Career Accelerators →
+</button>
+    </div>
+</div>
+                        
+
+                        {/* Course Grid */}
+                        <div id="course-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                            {ALL_COURSES.map((course) => {
+                                const isPaid = course.price > 0;
+                                const isPurchased = purchasedCourseIds.includes(course.id);
+                                const isEnrolled = enrolledCourseIds.includes(course.id);
+                                return (
+                                    <div key={course.id} className="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-2xl transition-all border border-gray-100 flex flex-col justify-between">
+                                        <div className="h-48 bg-gray-100 relative">
+                                            <img src={course.thumbnail} alt={course.title} className="w-full h-full object-cover" />
+                                            <span className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-bold text-indigo-600 uppercase tracking-widest border border-gray-100">
+                                                {course.level}
+                                            </span>
+                                            {isEnrolled && (
+                                                <span className="absolute top-4 left-4 bg-emerald-500 text-white text-[10px] font-black px-2 py-1 rounded-full uppercase tracking-wider">✓ Enrolled</span>
+                                            )}
+                                            {course.adminCreated && (
+                                                <span className="absolute bottom-3 left-3 bg-indigo-600 text-white text-[10px] font-black px-2 py-1 rounded-full uppercase tracking-wider">Admin Created</span>
+                                            )}
                                         </div>
-                                        <div className="mt-6 pt-4 border-t border-gray-50">
-                                            <div className="flex justify-between items-center mb-4">
-                                                {!isPaid ? (
-                                                    <span className="text-2xl font-black text-emerald-600 tracking-tight">FREE</span>
-                                                ) : isPurchased ? (
-                                                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-md">Purchased ✓</span>
-                                                ) : (
-                                                    <span className="text-2xl font-black text-gray-900">${course.price}</span>
-                                                )}
-                                                <span className="text-xs font-semibold text-gray-400 bg-gray-50 px-2 py-1 rounded-md">{course.duration}</span>
+                                        <div className="p-6 flex-1 flex flex-col justify-between">
+                                            <div>
+                                                <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md">{course.category}</span>
+                                                <h3 className="text-xl font-bold text-gray-900 mt-3 line-clamp-2 min-h-[56px]">{course.title}</h3>
+                                                <p className="text-gray-500 text-sm mt-2 line-clamp-3">{course.description}</p>
                                             </div>
-                                            <button
-                                                onClick={() => {
-                                                    if (isEnrolled) { setSelectedCourse(course); setActiveLesson(course.lessons[0]); }
-                                                    else if (isPaid && !isPurchased) { setPaymentCourse(course); }
-                                                    else { handleEnrollFree(course); }
-                                                }}
-                                                className={`w-full text-center py-3 rounded-xl font-bold transition shadow-md ${
-                                                    isEnrolled ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-100' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-100'
-                                                }`}>
-                                                {isEnrolled ? '▶ Continue Learning' : isPaid && !isPurchased ? 'Unlock Premium Course 💳' : 'Enroll Free & Start →'}
-                                            </button>
+                                            <div className="mt-6 pt-4 border-t border-gray-50">
+                                                <div className="flex justify-between items-center mb-4">
+                                                    {!isPaid ? (
+                                                        <span className="text-2xl font-black text-emerald-600 tracking-tight">FREE</span>
+                                                    ) : isPurchased ? (
+                                                        <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-md">Purchased ✓</span>
+                                                    ) : (
+                                                        <span className="text-2xl font-black text-gray-900">${course.price}</span>
+                                                    )}
+                                                    <span className="text-xs font-semibold text-gray-400 bg-gray-50 px-2 py-1 rounded-md">{course.duration}</span>
+                                                </div>
+                                                <button
+                                                    onClick={() => {
+                                                        if (!isAuthenticated) { navigate('/login'); return; }
+                                                        if (isEnrolled) { setSelectedCourse(course); setActiveLesson(course.lessons[0]); }
+                                                        else if (isPaid && !isPurchased) { setPaymentCourse(course); }
+                                                        else { handleEnrollFree(course); }
+                                                    }}
+                                                    className={`w-full text-center py-3 rounded-xl font-bold transition shadow-md ${
+                                                        isEnrolled ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-100' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-100'
+                                                    }`}>
+                                                    {isEnrolled ? '▶ Continue Learning' : isPaid && !isPurchased ? 'Unlock Premium Course 💳' : 'Enroll Free & Start →'}
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            );
-                        })}
+                                );
+                            })}
+                        </div>
                     </div>
                 )}
             </div>
