@@ -1422,7 +1422,7 @@ function Dashboard() {
 
                 {/* Explore Tab */}
                 {activeTab === 'explore' && (
-                    <div>
+                    <div className="-mx-4 md:mx-0">
                         {/* Hero Banner */}
 <div className="relative rounded-none md:rounded-2xl overflow-hidden mb-4 md:mb-8 mx-0"
     style={{ background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4f46e5 100%)' }}>
@@ -1450,13 +1450,13 @@ function Dashboard() {
                         
 
                         {/* Course Grid */}
-                        <div id="course-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 px-3 md:px-0 md:gap-8">
+                        <div id="course-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8">
                             {ALL_COURSES.map((course) => {
                                 const isPaid = course.price > 0;
                                 const isPurchased = purchasedCourseIds.includes(course.id);
                                 const isEnrolled = enrolledCourseIds.includes(course.id);
                                 return (
-                                    <div key={course.id} className="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-2xl transition-all border border-gray-100 flex flex-col justify-between">
+                                   <div key={course.id} className="bg-white rounded-none md:rounded-2xl overflow-hidden shadow-sm hover:shadow-2xl transition-all border-0 md:border border-gray-100 flex flex-col justify-between">
                                         <div className="h-48 bg-gray-100 relative">
                                             <img src={course.thumbnail} alt={course.title} className="w-full h-full object-cover" />
                                             <span className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-bold text-indigo-600 uppercase tracking-widest border border-gray-100">
